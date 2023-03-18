@@ -1,3 +1,5 @@
+from time import gmtime
+
 
 class Vertex:
 
@@ -92,6 +94,7 @@ class Scheduler:
         """
         Print the machines execution.
         """
+        print()
         finish_times = {self.start: 0}
 
         for machine in self.machines:
@@ -112,9 +115,15 @@ class Scheduler:
             finish_times[current_operation] = start + current_operation.operation.get_duration()
 
             print(f"{machine.get_name()}:   ", end="")
-            print(f"{current_operation.part.get_name()} ({current_operation.item_number})  start: {start}  "
-                  f"duration: {current_operation.operation.get_duration()}"
-                  f"  finish: {finish_times[current_operation]}s", end=" | ")
+            # print(f"{current_operation.part.get_name()} ({current_operation.item_number})  start: {start}  "
+            #       f"duration: {current_operation.operation.get_duration()}"
+            #       f"  finish: {finish_times[current_operation]}s", end=" | ")
+
+            start_time = gmtime(start)
+            finish_time = gmtime(finish_times[current_operation])
+            print(f"{current_operation.part.get_name()} ({current_operation.item_number})  {start_time.tm_hour}:"
+                  f"{start_time.tm_min}:{start_time.tm_sec}  ->  {finish_time.tm_hour}:{finish_time.tm_min}:{finish_time.tm_sec} ",
+                  end=" | ")
 
             # set the finish time for each operation on the specific machine
             for next in ops_on_machine[1:]:
@@ -147,10 +156,20 @@ class Scheduler:
 
                 finish_times[next] = start + next.operation.get_duration()
 
-                print(f"{next.part.get_name()} ({next.item_number})  start: {start}  "
-                      f"duration: {next.operation.get_duration()}"
-                      f"  finish: {finish_times[next]}s", end=" | ")
+                # print(f"{next.part.get_name()} ({next.item_number})  start: {start}  "
+                #       f"duration: {next.operation.get_duration()}"
+                #       f"  finish: {finish_times[next]}s", end=" | ")
+
+                start_time = gmtime(start)
+                finish_time = gmtime(finish_times[next])
+                print(f"{next.part.get_name()} ({next.item_number})  {start_time.tm_hour}:"
+                      f"{start_time.tm_min}:{start_time.tm_sec}  ->  {finish_time.tm_hour}:{finish_time.tm_min}:{finish_time.tm_sec} ",
+                      end=" | ")
 
                 current_operation = next
 
             print()
+
+        final_time = max(finish_times.values())
+        final_time = gmtime(final_time)
+        print(f"Total time: {final_time.tm_hour}:{final_time.tm_min}:{final_time.tm_sec}\n")
