@@ -90,47 +90,107 @@ class Scheduler:
                     elif self.get_operation_time(vertex2) <= self.get_operation_time(vertex1):
                         self.out[vertex2].append(vertex1)
 
+    def order_machines(self):
+        """
+        Orders the machines in such way that every operation from each part is executed in the right order.
+        (ex: a pen which arrives at machine 2 without going trough the 1 first)
+        """
+        ordered = []
+
+        # this will store indexes of operations list for each part
+        # => will help when getting rid of dependencies between machines
+        indexes = {}
+        for part in self.parts:
+            indexes[part] = 0
+
+        # while there is at least one operation unvisited on any part
+        ok = False
+        while not ok:
+            ok = True
+            # stores the operation from each part where indexes dict is pointing
+            # (the first element from each list which eas not eliminated)
+            firsts = []
+            for part in self.parts:
+
+                if indexes[part] < len(part.get_operations()):
+                    machine = part.get_operations()[indexes[part]].get_machine()
+                    # if we didn't took into consideration already this machine
+                    if machine not in firsts:
+                        ok = False
+                        firsts.append(machine)
+
+            for first in firsts:
+                is_good = True
+                for part in self.parts:
+                    for op in part.get_operations()[indexes[part]+1:]:
+                        # if we find that a candidate for the independent machine is in any list of operations
+                        # from any part => it is dependent (not a good candidate)
+                        if first == op.get_machine():
+                            is_good = False
+                            break
+
+                if is_good:
+                    ordered.append(first)
+                    for part in self.parts:
+                        # go to the next operation for each part that has as its machine, for the current operation index,
+                        # the independent one found earlier
+                        if part.get_operations()[indexes[part]].get_machine() == first:
+                            indexes[part] += 1
+                    break
+
+        self.machines = ordered
+
     def print_machine_executions(self):
         """
         Print the machines execution.
         """
-        print()
+        # order the machines to get rid of any dependency between operations
+        self.order_machines()
+
+        # this will denote the finish times for each operation without the cooldown of hte machine
         finish_times = {self.start: 0}
 
         for machine in self.machines:
+            processes = []
+
             # get all operations on the machine and order them after outdegree (the first to run is the one with
             # the biggest outdegree
             ops_on_machine = list(filter(lambda x: x.operation.get_machine() == machine, self.vertices))
             ops_on_machine = sorted(ops_on_machine, key=lambda x: len(self.out[x]), reverse=True)
-
-            current_operation = ops_on_machine[0]
-            parent_of_first_op = list(filter(lambda x: current_operation in self.out[x], self.out.keys()))[0]
-
-            # initiate the starting time (how long one machine waits until it does the first operation)
-            # = the finish time of the parent of the first vertex operation
-
-            start = finish_times[parent_of_first_op]
             cooldown = machine.get_cooldown()
-            # add the initial time and duration to find the finish time for the current operation
-            finish_times[current_operation] = start + current_operation.operation.get_duration()
 
-            print(f"{machine.get_name()}:   ", end="")
-            # print(f"{current_operation.part.get_name()} ({current_operation.item_number})  start: {start}  "
-            #       f"duration: {current_operation.operation.get_duration()}"
-            #       f"  finish: {finish_times[current_operation]}s", end=" | ")
+            i = 0
+            j = 0
+            # the initial list with processes must be equal with the number of operation on the machine or
+            # with the capacity of the machine
+            while i < len(ops_on_machine) and j < machine.get_capacity():
 
-            start_time = gmtime(start)
-            finish_time = gmtime(finish_times[current_operation])
-            print(f"{current_operation.part.get_name()} ({current_operation.item_number})  {start_time.tm_hour}:"
-                  f"{start_time.tm_min}:{start_time.tm_sec}  ->  {finish_time.tm_hour}:{finish_time.tm_min}:{finish_time.tm_sec} ",
-                  end=" | ")
+                current_operation = ops_on_machine[i]
+                parent_of_op = list(filter(lambda x: current_operation in self.out[x], self.out.keys()))[0]
+
+                # initiate the starting time (how long one machine waits until it does the first operation)
+                # = the finish time of the parent of the first vertex operation
+                # (this is the start from the disjunctive point of view)
+                start = finish_times[parent_of_op]
+                # add the initial time and duration to find the finish time for the current operation
+                finish_times[current_operation] = start + current_operation.operation.get_duration()
+
+                processes.append((current_operation, start))
+
+                i += 1
+                j += 1
+
+            print(f"Machine {machine.get_name()}:")
 
             # set the finish time for each operation on the specific machine
-            for next in ops_on_machine[1:]:
+            for next in ops_on_machine[i:]:
 
-                # next operation begins when current one ends
-                # start += current_operation.operation.get_duration()
-                start = finish_times[current_operation]
+                prev_operation, prev_start = min(processes, key=lambda x: finish_times[x[0]])
+                # getting the index of the prev_operation means finding in which capacity the operation was done
+                index = processes.index((prev_operation, prev_start))
+
+                # next operation begins when current shortest one ends
+                start = finish_times[prev_operation]
 
                 conjunctive_parent = list(filter(lambda x: next in self.out[x] and x.part == next.part and
                                                            x.item_number == next.item_number, self.vertices))
@@ -140,9 +200,9 @@ class Scheduler:
                     conjunctive_parent = conjunctive_parent[0]
 
                     # calculate how long a machine waits before receiving another part
-                    diff = finish_times[conjunctive_parent] - finish_times[current_operation]
+                    diff = finish_times[conjunctive_parent] - finish_times[prev_operation]
 
-                    # if is >0 add it to the time before the beginning of next operation
+                    # if dif is > 0 add it to the time before the beginning of next operation
                     if diff > 0:
                         start += diff
 
@@ -156,17 +216,27 @@ class Scheduler:
 
                 finish_times[next] = start + next.operation.get_duration()
 
-                # print(f"{next.part.get_name()} ({next.item_number})  start: {start}  "
-                #       f"duration: {next.operation.get_duration()}"
-                #       f"  finish: {finish_times[next]}s", end=" | ")
+                # pop the prev_operation from the process and replace it with the next one
+                processes.pop(index)
+                processes.insert(index, (next, start))
 
-                start_time = gmtime(start)
-                finish_time = gmtime(finish_times[next])
-                print(f"{next.part.get_name()} ({next.item_number})  {start_time.tm_hour}:"
-                      f"{start_time.tm_min}:{start_time.tm_sec}  ->  {finish_time.tm_hour}:{finish_time.tm_min}:{finish_time.tm_sec} ",
-                      end=" | ")
+                # print the operation done (prev_operation)
+                start_time = gmtime(prev_start)
+                finish_time = gmtime(finish_times[prev_operation])
+                print(f"Process {index} => {prev_operation.part.get_name()} ({prev_operation.item_number})  {start_time.tm_hour}:"
+                      f"{start_time.tm_min}:{start_time.tm_sec}  ->  {finish_time.tm_hour}:{finish_time.tm_min}:{finish_time.tm_sec} ")
 
-                current_operation = next
+            # print the remaining processes in order of which finishes first
+            while processes:
+                # find the process which finished first and remove it from the list
+                prev_operation, prev_start = min(processes, key=lambda x: finish_times[x[0]])
+                index = processes.index((prev_operation, prev_start))
+                processes.pop(index)
+
+                start_time = gmtime(prev_start)
+                finish_time = gmtime(finish_times[prev_operation])
+                print(f"Process {index} => {prev_operation.part.get_name()} ({prev_operation.item_number})  {start_time.tm_hour}:"
+                      f"{start_time.tm_min}:{start_time.tm_sec}  ->  {finish_time.tm_hour}:{finish_time.tm_min}:{finish_time.tm_sec} ")
 
             print()
 
